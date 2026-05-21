@@ -213,19 +213,37 @@ h3 { font-size: 1.1rem !important; font-weight: 600 !important; }
 
 /* tab styling */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 4px;
-    background: #f0f2f6;
-    padding: 4px;
-    border-radius: 10px;
+    gap: 6px;
+    background: #e2e8f0;
+    padding: 5px;
+    border-radius: 12px;
 }
 .stTabs [data-baseweb="tab"] {
     border-radius: 8px;
-    padding: 8px 22px;
-    font-weight: 600;
-    font-size: 0.9rem;
+    padding: 10px 28px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #1e293b !important;
+    background: transparent;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    background: #cbd5e1 !important;
+    color: #0f172a !important;
+}
+.stTabs [aria-selected="true"] {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+}
+/* force all tab label text to be dark and visible */
+.stTabs [data-baseweb="tab"] p,
+.stTabs [data-baseweb="tab"] span,
+.stTabs [data-baseweb="tab"] div {
+    color: #1e293b !important;
+    font-weight: 700 !important;
 }
 
-/* download button */
+/* download button — default (structure tab) */
 .stDownloadButton > button {
     background: #2E4057 !important;
     color: white !important;
@@ -236,6 +254,24 @@ h3 { font-size: 1.1rem !important; font-weight: 600 !important; }
 }
 .stDownloadButton > button:hover {
     background: #1a2d42 !important;
+}
+
+/* mapping download button — bright green, larger */
+.map-download-btn .stDownloadButton > button {
+    background: #16A34A !important;
+    color: white !important;
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    font-size: 1rem !important;
+    padding: 0.75rem 2.5rem !important;
+    border: none !important;
+    box-shadow: 0 4px 14px rgba(22,163,74,0.4) !important;
+    letter-spacing: 0.3px;
+}
+.map-download-btn .stDownloadButton > button:hover {
+    background: #15803D !important;
+    box-shadow: 0 6px 18px rgba(22,163,74,0.55) !important;
+    transform: translateY(-1px);
 }
 
 /* info boxes */
@@ -497,12 +533,14 @@ with tab2:
         xlsx_bytes = df_to_xlsx_bytes(out_df, col_padding=map_padding)
         out_name = base_file.name.rsplit('.', 1)[0] + "_mapped.xlsx"
 
+        st.markdown('<div class="map-download-btn">', unsafe_allow_html=True)
         st.download_button(
-            label="⬇️  Download mapped file",
+            label="⬇️  Download Mapped File",
             data=xlsx_bytes,
             file_name=out_name,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        st.markdown('</div>', unsafe_allow_html=True)
 
     elif exp_file or base_file:
         st.info("Please upload **both** the expected schema file and the base data file to continue.")
