@@ -69,39 +69,53 @@ def read_file(uploaded) -> pd.DataFrame:
 
 
 def df_to_xlsx_bytes(df: pd.DataFrame, col_padding: int = 0) -> bytes:
-    """Write df to xlsx with optional extra column-width padding."""
+    """Write df to xlsx — Calibri, yellow bold headers, white data, thin borders on table only."""
     wb_out = Workbook()
     ws = wb_out.active
 
-    header_font  = Font(bold=True, color="FFFFFF", name="Calibri", size=11)
-    header_fill  = PatternFill("solid", fgColor="2E4057")
-    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    thin = Side(border_style="thin", color="CCCCCC")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    # ── Fonts ──────────────────────────────────────────────────────────────
+    # Heading: Calibri 12 bold, BLACK text
+    header_font = Font(bold=True, name="Calibri", size=12, color="000000")
+    # Data: Calibri 11, BLACK text
+    data_font   = Font(bold=False, name="Calibri", size=11, color="000000")
 
-    # write header
+    # ── Header fill — yellow background ────────────────────────────────────
+    header_fill  = PatternFill("solid", fgColor="FFFF00")   # yellow
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    # ── Data rows fill — white background ──────────────────────────────────
+    row_fill_odd  = PatternFill("solid", fgColor="FFFFFF")  # white
+    row_fill_even = PatternFill("solid", fgColor="FFFFFF")  # white
+
+    # ── Borders — thin black on all 4 sides, ONLY on table cells ──────────
+    thin = Side(border_style="thin", color="000000")
+    cell_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    n_rows = len(df)
+    n_cols = len(df.columns)
+
+    # ── Write header row ───────────────────────────────────────────────────
     for ci, col in enumerate(df.columns, start=1):
         cell = ws.cell(row=1, column=ci, value=col)
-        cell.font   = header_font
-        cell.fill   = header_fill
+        cell.font      = header_font
+        cell.fill      = header_fill
         cell.alignment = header_align
-        cell.border = border
+        cell.border    = cell_border
 
-    # write data — use iloc to avoid itertuples mangling col names like S.No
-    alt_fill = PatternFill("solid", fgColor="F4F6F9")
-    for ri in range(len(df)):
-        fill = alt_fill if (ri + 2) % 2 == 0 else None
-        for ci in range(len(df.columns)):
+    # ── Write data rows ────────────────────────────────────────────────────
+    for ri in range(n_rows):
+        fill = row_fill_odd if ri % 2 == 0 else row_fill_even
+        for ci in range(n_cols):
             val = df.iloc[ri, ci]
-            # convert numpy types to python natives so openpyxl is happy
             if hasattr(val, 'item'):
                 val = val.item()
             cell = ws.cell(row=ri + 2, column=ci + 1, value=val)
-            cell.border = border
-            if fill:
-                cell.fill = fill
+            cell.font      = data_font
+            cell.fill      = fill
+            cell.border    = cell_border
+            cell.alignment = Alignment(vertical="center")
 
-    # column widths
+    # ── Column widths ──────────────────────────────────────────────────────
     for ci, col in enumerate(df.columns, start=1):
         col_letter = get_column_letter(ci)
         try:
@@ -112,7 +126,7 @@ def df_to_xlsx_bytes(df: pd.DataFrame, col_padding: int = 0) -> bytes:
         max_len = max(len(str(col)), data_max)
         ws.column_dimensions[col_letter].width = max_len + col_padding + 2
 
-    ws.row_dimensions[1].height = 28
+    ws.row_dimensions[1].height = 30
     ws.freeze_panes = "A2"
 
     buf = io.BytesIO()
