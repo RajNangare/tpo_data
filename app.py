@@ -14,6 +14,33 @@ def to_title_case(text: str) -> str:
     return ' '.join(word.capitalize() for word in s.split())
 
 
+def convert_column_type(series: pd.Series, dtype: str) -> pd.Series:
+    """Convert a series to int, float, or 10-digit phone number."""
+    if dtype == "Integer":
+        def to_int(v):
+            try:
+                return int(float(str(v).strip()))
+            except:
+                return v
+        return series.apply(lambda v: to_int(v) if pd.notna(v) else v)
+
+    elif dtype == "Float":
+        def to_float(v):
+            try:
+                return float(str(v).strip())
+            except:
+                return v
+        return series.apply(lambda v: to_float(v) if pd.notna(v) else v)
+
+    elif dtype == "Phone (last 10 digits)":
+        def to_phone(v):
+            digits = re.sub(r"\D", "", str(v))  # strip all non-digits
+            return digits[-10:] if len(digits) >= 10 else digits
+        return series.apply(lambda v: to_phone(v) if pd.notna(v) else v)
+
+    return series
+
+
 def read_file(uploaded) -> pd.DataFrame:
     name = uploaded.name.lower()
     if name.endswith('.csv'):
@@ -369,6 +396,19 @@ with tab1:
             drop_empty = st.checkbox("Drop fully-empty rows", value=False, key="drop_empty")
 
         st.markdown("---")
+        st.markdown("#### 5️⃣ Convert column data types")
+        st.markdown('<div class="tip-box">Select a column and choose how to convert its values. Phone number keeps only the last 10 digits.</div>', unsafe_allow_html=True)
+
+        type_conversions = {}   # col_name -> dtype string
+        num_conversions = st.number_input("How many columns to convert?", min_value=0, max_value=20, value=0, step=1, key="num_conv")
+        for i in range(int(num_conversions)):
+            cc1, cc2 = st.columns([2, 1])
+            col_choice = cc1.selectbox(f"Column #{i+1}", options=["— select —"] + original_cols, key=f"conv_col_{i}")
+            type_choice = cc2.selectbox(f"Convert to", options=["Integer", "Float", "Phone (last 10 digits)"], key=f"conv_type_{i}")
+            if col_choice != "— select —":
+                type_conversions[col_choice] = type_choice
+
+        st.markdown("---")
         st.markdown("### 🔄 Preview result")
 
         result = df.copy()
@@ -376,6 +416,11 @@ with tab1:
         if drop_empty:
             # Only drop rows that are ENTIRELY empty — never drop columns
             result = result.dropna(how='all')
+
+        # Apply type conversions using original column names
+        for col, dtype in type_conversions.items():
+            if col in result.columns:
+                result[col] = convert_column_type(result[col], dtype)
 
         # Apply value transformation FIRST using original column names
         for col in data_camel_cols:
@@ -491,6 +536,19 @@ with tab2:
             map_drop_empty = st.checkbox("Drop fully-empty rows", value=False, key="map_drop")
 
         st.markdown("---")
+        st.markdown("#### Convert column data types")
+        st.markdown('<div class="tip-box">Select a column and choose how to convert its values. Phone number keeps only the last 10 digits.</div>', unsafe_allow_html=True)
+
+        map_type_conversions = {}
+        map_num_conv = st.number_input("How many columns to convert?", min_value=0, max_value=20, value=0, step=1, key="map_num_conv")
+        for i in range(int(map_num_conv)):
+            mc1b, mc2b = st.columns([2, 1])
+            col_choice = mc1b.selectbox(f"Column #{i+1}", options=["— select —"] + exp_cols, key=f"map_conv_col_{i}")
+            type_choice = mc2b.selectbox(f"Convert to", options=["Integer", "Float", "Phone (last 10 digits)"], key=f"map_conv_type_{i}")
+            if col_choice != "— select —":
+                map_type_conversions[col_choice] = type_choice
+
+        st.markdown("---")
         st.markdown("### 🔄 Preview mapped result")
 
         # build output dataframe
@@ -505,6 +563,11 @@ with tab2:
 
         if map_drop_empty:
             out_df = out_df.dropna(how='all')
+
+        # Apply type conversions
+        for col, dtype in map_type_conversions.items():
+            if col in out_df.columns:
+                out_df[col] = convert_column_type(out_df[col], dtype)
 
         # Apply value transformation FIRST using original col names
         for col in map_data_camel_cols:
