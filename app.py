@@ -85,6 +85,10 @@ def df_to_xlsx_bytes(df: pd.DataFrame, col_padding: int = 0) -> bytes:
         for ci in range(n_cols):
             val = df.iloc[ri, ci]
             if hasattr(val, 'item'): val = val.item()
+            try:
+                if pd.isna(val): val = "NA"
+            except (TypeError, ValueError):
+                pass
             cell = ws.cell(row=ri + 2, column=ci + 1, value=val)
             cell.font = data_font; cell.fill = white_fill
             cell.border = cell_border; cell.alignment = data_align
@@ -105,7 +109,7 @@ def df_to_xlsx_bytes(df: pd.DataFrame, col_padding: int = 0) -> bytes:
 
 
 def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode('utf-8')
+    return df.fillna("NA").to_csv(index=False).encode('utf-8')
 
 
 def _make_error_pdf(message: str) -> bytes:
@@ -178,7 +182,7 @@ def df_to_pdf_bytes(df: pd.DataFrame) -> bytes:
     def safe_str(v):
         try:
             if pd.isna(v):
-                return ""
+                return "NA"
         except (TypeError, ValueError):
             pass
         return str(v)
@@ -227,7 +231,7 @@ def df_to_html_preview(df: pd.DataFrame) -> str:
         cells = ""
         for ci in range(len(df.columns)):
             val = df.iloc[ri, ci]
-            val = "" if pd.isna(val) else str(val)
+            val = "NA" if pd.isna(val) else str(val)
             cells += f'<td>{val}</td>'
         rows_html += f"<tr>{cells}</tr>"
     headers = "".join(f"<th>{col}</th>" for col in df.columns)
