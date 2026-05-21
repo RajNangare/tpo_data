@@ -1,0 +1,440 @@
+import streamlit as st
+import pandas as pd
+import re
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def to_title_case(text: str) -> str:
+    """Convert any string to Title Case (e.g. RAJ NANGARE -> Raj Nangare)."""
+    s = str(text).strip()
+    return ' '.join(word.capitalize() for word in s.split())
+
+
+def read_file(uploaded) -> pd.DataFrame:
+    name = uploaded.name.lower()
+    if name.endswith('.csv'):
+        import io as _io
+        raw = uploaded.read()
+        uploaded.seek(0)
+
+        # Auto-detect separator
+        sample = raw[:4096].decode('utf-8', errors='replace')
+        sep = ','
+        for candidate in [',', ';', '\t', '|']:
+            if sample.count(candidate) > sample.count(sep):
+                sep = candidate
+
+        # Read header to get real column names
+        text = raw.decode('utf-8', errors='replace')
+        lines = text.splitlines()
+        header = lines[0].split(sep) if lines else []
+
+        # Find max columns across all rows (some CSVs have more data cols than header)
+        max_cols = max((len(l.split(sep)) for l in lines if l.strip()), default=len(header))
+
+        # Pad header if needed so pandas doesn't eat col 0 as index
+        extra = max_cols - len(header)
+        col_names = header + [f'_extra_{i}' for i in range(extra)]
+
+        df = pd.read_csv(
+            _io.BytesIO(raw),
+            sep=sep,
+            on_bad_lines='skip',
+            engine='python',
+            index_col=False,
+            names=col_names,
+            skiprows=1,
+        )
+        # Drop the padded overflow columns
+        df = df[[c for c in df.columns if not c.startswith('_extra_')]]
+
+    else:
+        df = pd.read_excel(uploaded, index_col=None)
+
+    # Drop only columns that are Unnamed AND completely empty (stray Excel cols)
+    unnamed_mask = df.columns.astype(str).str.match(r'^Unnamed')
+    all_empty_mask = df.isnull().all(axis=0)
+    df = df.loc[:, ~(unnamed_mask & all_empty_mask)]
+
+    # Drop rows that are completely empty
+    df = df.dropna(how='all')
+
+    # Reset index cleanly
+    df = df.reset_index(drop=True)
+    return df
+
+
+def df_to_xlsx_bytes(df: pd.DataFrame, col_padding: int = 0) -> bytes:
+    """Write df to xlsx with optional extra column-width padding."""
+    wb_out = Workbook()
+    ws = wb_out.active
+
+    header_font  = Font(bold=True, color="FFFFFF", name="Calibri", size=11)
+    header_fill  = PatternFill("solid", fgColor="2E4057")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin = Side(border_style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    # write header
+    for ci, col in enumerate(df.columns, start=1):
+        cell = ws.cell(row=1, column=ci, value=col)
+        cell.font   = header_font
+        cell.fill   = header_fill
+        cell.alignment = header_align
+        cell.border = border
+
+    # write data — use iloc to avoid itertuples mangling col names like S.No
+    alt_fill = PatternFill("solid", fgColor="F4F6F9")
+    for ri in range(len(df)):
+        fill = alt_fill if (ri + 2) % 2 == 0 else None
+        for ci in range(len(df.columns)):
+            val = df.iloc[ri, ci]
+            # convert numpy types to python natives so openpyxl is happy
+            if hasattr(val, 'item'):
+                val = val.item()
+            cell = ws.cell(row=ri + 2, column=ci + 1, value=val)
+            cell.border = border
+            if fill:
+                cell.fill = fill
+
+    # column widths
+    for ci, col in enumerate(df.columns, start=1):
+        col_letter = get_column_letter(ci)
+        try:
+            data_max = df[col].dropna().astype(str).str.len().max()
+            data_max = int(data_max) if pd.notna(data_max) else 0
+        except Exception:
+            data_max = 0
+        max_len = max(len(str(col)), data_max)
+        ws.column_dimensions[col_letter].width = max_len + col_padding + 2
+
+    ws.row_dimensions[1].height = 28
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb_out.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+# ── page config ──────────────────────────────────────────────────────────────
+
+st.set_page_config(
+    page_title="Sheet Toolkit",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Space Grotesk', sans-serif;
+}
+.block-container { padding-top: 1.5rem; }
+
+h1 { font-size: 2rem !important; font-weight: 700 !important; letter-spacing: -0.5px; }
+h2 { font-size: 1.35rem !important; font-weight: 600 !important; }
+h3 { font-size: 1.1rem !important; font-weight: 600 !important; }
+
+/* tab styling */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+    background: #f0f2f6;
+    padding: 4px;
+    border-radius: 10px;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 8px;
+    padding: 8px 22px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+/* download button */
+.stDownloadButton > button {
+    background: #2E4057 !important;
+    color: white !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    padding: 0.5rem 1.5rem !important;
+    border: none !important;
+}
+.stDownloadButton > button:hover {
+    background: #1a2d42 !important;
+}
+
+/* info boxes */
+.tip-box {
+    background: #EFF6FF;
+    border-left: 4px solid #3B82F6;
+    padding: 0.75rem 1rem;
+    border-radius: 0 8px 8px 0;
+    font-size: 0.88rem;
+    color: #1E40AF;
+    margin-bottom: 1rem;
+}
+
+.section-card {
+    background: white;
+    border: 1px solid #E5E7EB;
+    border-radius: 12px;
+    padding: 1.2rem 1.5rem;
+    margin-bottom: 1.2rem;
+}
+
+code { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; }
+</style>
+""", unsafe_allow_html=True)
+
+# ── sidebar ───────────────────────────────────────────────────────────────────
+
+with st.sidebar:
+    st.markdown("## 📊 Sheet Toolkit")
+    st.markdown("---")
+    st.markdown("""
+**Two modes:**
+
+🔧 **Structure** — Clean & format a single file  
+🔗 **Mapping** — Map a base file to an expected schema
+    """)
+    st.markdown("---")
+    st.markdown("**Supported formats:** `.csv`, `.xlsx`, `.xls`, `.xlsm`")
+    st.markdown("---")
+    st.caption("Tip: All downloads are `.xlsx` with formatted headers.")
+
+# ── main ─────────────────────────────────────────────────────────────────────
+
+st.markdown("# 📊 Sheet Toolkit")
+st.markdown("Clean, structure, and map your spreadsheet data in seconds.")
+
+tab1, tab2 = st.tabs(["🔧  Structure File", "🔗  Mapping"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — STRUCTURE FILE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab1:
+    st.markdown("### Upload your file")
+    uploaded = st.file_uploader(
+        "Drag & drop or browse",
+        type=["csv", "xlsx", "xls", "xlsm"],
+        key="struct_upload",
+    )
+
+    if uploaded:
+        df = read_file(uploaded)
+        original_cols = list(df.columns)
+
+        st.success(f"Loaded **{len(df)} rows × {len(df.columns)} cols**")
+
+        with st.expander("👀 Preview raw data", expanded=False):
+            st.dataframe(df.head(10), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.markdown("### ⚙️ Transformations")
+
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            st.markdown("#### 1️⃣ Title Case headers")
+            st.markdown('<div class="tip-box">All column headers will be converted to Title Case (e.g. "FULL NAME" → "Full Name").</div>', unsafe_allow_html=True)
+            do_all_camel = st.checkbox("Convert ALL headers to Title Case", value=True, key="all_camel")
+
+            st.markdown("#### 2️⃣ Title Case selected data columns")
+            st.markdown('<div class="tip-box">Pick columns whose <em>cell values</em> should be converted to Title Case (e.g. RAJ NANGARE → Raj Nangare).</div>', unsafe_allow_html=True)
+            data_camel_cols = st.multiselect(
+                "Select columns",
+                options=original_cols,
+                key="data_camel",
+            )
+
+        with col_b:
+            st.markdown("#### 3️⃣ Column width padding")
+            st.markdown('<div class="tip-box">Extra characters added to each column beyond its longest value. Excel default fits content; adding padding gives breathing room.</div>', unsafe_allow_html=True)
+            col_padding = st.slider("Extra padding (chars)", 0, 20, 5, key="col_pad")
+
+            st.markdown("#### 4️⃣ Drop empty rows / columns")
+            drop_empty = st.checkbox("Drop fully-empty rows", value=False, key="drop_empty")
+
+        st.markdown("---")
+        st.markdown("### 🔄 Preview result")
+
+        result = df.copy()
+
+        if drop_empty:
+            # Only drop rows that are ENTIRELY empty — never drop columns
+            result = result.dropna(how='all')
+
+        # Apply value transformation FIRST using original column names
+        for col in data_camel_cols:
+            if col in result.columns:
+                result[col] = result[col].apply(
+                    lambda v: to_title_case(str(v)) if pd.notna(v) else v
+                )
+
+        # THEN rename headers
+        if do_all_camel:
+            result.columns = [to_title_case(c) for c in result.columns]
+
+        st.dataframe(result.head(20), use_container_width=True, hide_index=True)
+
+        xlsx_bytes = df_to_xlsx_bytes(result, col_padding=col_padding)
+        out_name = uploaded.name.rsplit('.', 1)[0] + "_structured.xlsx"
+
+        st.download_button(
+            label="⬇️  Download structured file",
+            data=xlsx_bytes,
+            file_name=out_name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — MAPPING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab2:
+    st.markdown("### Upload both files")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**📋 Expected / Target schema file**")
+        st.caption("Defines the column names you want in the output.")
+        exp_file = st.file_uploader(
+            "Expected file",
+            type=["csv", "xlsx", "xls", "xlsm"],
+            key="exp_upload",
+            label_visibility="collapsed",
+        )
+
+    with c2:
+        st.markdown("**📂 Base / Source data file**")
+        st.caption("The file whose data will be mapped to the expected schema.")
+        base_file = st.file_uploader(
+            "Base file",
+            type=["csv", "xlsx", "xls", "xlsm"],
+            key="base_upload",
+            label_visibility="collapsed",
+        )
+
+    if exp_file and base_file:
+        exp_df  = read_file(exp_file)
+        base_df = read_file(base_file)
+
+        exp_cols  = list(exp_df.columns)
+        base_cols = list(base_df.columns)
+
+        st.success(
+            f"Expected: **{len(exp_cols)} cols** | Base: **{len(base_df)} rows × {len(base_cols)} cols**"
+        )
+
+        with st.expander("👀 Preview expected schema (first 5 rows)", expanded=False):
+            st.dataframe(exp_df.head(5), use_container_width=True, hide_index=True)
+
+        with st.expander("👀 Preview base data (first 5 rows)", expanded=False):
+            st.dataframe(base_df.head(5), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.markdown("### 🗺️ Column Mapping")
+        st.markdown('<div class="tip-box">For each expected column, choose the matching column from your base file — or leave as <code>— (empty column) —</code> to include the column header with no data.</div>', unsafe_allow_html=True)
+
+        mapping = {}   # expected_col -> base_col or None
+        EMPTY_OPT = "— (empty column) —"
+        base_options = [EMPTY_OPT] + base_cols
+
+        # auto-suggest: case-insensitive exact match
+        def auto_match(exp_col):
+            for bc in base_cols:
+                if bc.strip().lower() == exp_col.strip().lower():
+                    return bc
+            return EMPTY_OPT
+
+        cols_per_row = 3
+        for i in range(0, len(exp_cols), cols_per_row):
+            row_cols = exp_cols[i:i + cols_per_row]
+            grid = st.columns(len(row_cols))
+            for j, exp_col in enumerate(row_cols):
+                default = auto_match(exp_col)
+                chosen = grid[j].selectbox(
+                    f"`{exp_col}`",
+                    options=base_options,
+                    index=base_options.index(default),
+                    key=f"map_{i}_{j}",
+                )
+                mapping[exp_col] = None if chosen == EMPTY_OPT else chosen
+
+        st.markdown("---")
+        st.markdown("### ⚙️ Output options")
+
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            map_all_camel = st.checkbox("Convert all output headers to Title Case", value=True, key="map_camel")
+            map_data_camel_cols = st.multiselect(
+                "Also convert values to Title Case in these output columns",
+                options=exp_cols,
+                key="map_data_camel",
+            )
+        with mc2:
+            map_padding = st.slider("Extra column-width padding (chars)", 0, 20, 5, key="map_pad")
+            map_drop_empty = st.checkbox("Drop fully-empty rows", value=False, key="map_drop")
+
+        st.markdown("---")
+        st.markdown("### 🔄 Preview mapped result")
+
+        # build output dataframe
+        out_data = {}
+        for exp_col, base_col in mapping.items():
+            if base_col and base_col in base_df.columns:
+                out_data[exp_col] = base_df[base_col].values
+            else:
+                out_data[exp_col] = [None] * len(base_df)
+
+        out_df = pd.DataFrame(out_data)
+
+        if map_drop_empty:
+            out_df = out_df.dropna(how='all')
+
+        # Apply value transformation FIRST using original col names
+        for col in map_data_camel_cols:
+            if col in out_df.columns:
+                out_df[col] = out_df[col].apply(
+                    lambda v: to_title_case(str(v)) if pd.notna(v) else v
+                )
+
+        # THEN rename headers
+        if map_all_camel:
+            out_df.columns = [to_title_case(c) for c in out_df.columns]
+
+        st.dataframe(out_df.head(20), use_container_width=True, hide_index=True)
+
+        # mapping summary
+        with st.expander("📋 Mapping summary"):
+            summary_rows = []
+            for exp_col, base_col in mapping.items():
+                summary_rows.append({
+                    "Expected Column": exp_col,
+                    "Mapped From (Base)": base_col if base_col else "— empty —",
+                    "Status": "✅ Mapped" if base_col else "⬜ Empty",
+                })
+            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+        xlsx_bytes = df_to_xlsx_bytes(out_df, col_padding=map_padding)
+        out_name = base_file.name.rsplit('.', 1)[0] + "_mapped.xlsx"
+
+        st.download_button(
+            label="⬇️  Download mapped file",
+            data=xlsx_bytes,
+            file_name=out_name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    elif exp_file or base_file:
+        st.info("Please upload **both** the expected schema file and the base data file to continue.")
