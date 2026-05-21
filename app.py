@@ -113,7 +113,7 @@ def df_to_xlsx_bytes(df: pd.DataFrame, col_padding: int = 0) -> bytes:
             cell.font      = data_font
             cell.fill      = fill
             cell.border    = cell_border
-            cell.alignment = Alignment(vertical="center")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
 
     # ── Column widths ──────────────────────────────────────────────────────
     for ci, col in enumerate(df.columns, start=1):
@@ -134,6 +134,60 @@ def df_to_xlsx_bytes(df: pd.DataFrame, col_padding: int = 0) -> bytes:
     buf.seek(0)
     return buf.read()
 
+
+
+def df_to_html_preview(df: pd.DataFrame) -> str:
+    """Render df as a styled HTML table matching the Excel output exactly."""
+    rows_html = ""
+    for ri in range(min(len(df), 20)):
+        cells = ""
+        for ci in range(len(df.columns)):
+            val = df.iloc[ri, ci]
+            val = "" if pd.isna(val) else str(val)
+            cells += f'<td>{val}</td>'
+        rows_html += f"<tr>{cells}</tr>"
+
+    headers = "".join(f"<th>{col}</th>" for col in df.columns)
+
+    return f"""
+    <div style="overflow-x:auto; margin-top:8px;">
+    <table style="
+        border-collapse: collapse;
+        font-family: Calibri, sans-serif;
+        width: 100%;
+        font-size: 13px;
+    ">
+        <thead>
+            <tr style="background:#FFFF00;">
+                {headers}
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
+    </div>
+    <style>
+    table th {{
+        background: #FFFF00 !important;
+        color: #000000 !important;
+        font-weight: bold !important;
+        font-size: 14px !important;
+        text-align: center !important;
+        padding: 7px 10px !important;
+        border: 1.5px solid #000000 !important;
+        white-space: nowrap;
+    }}
+    table td {{
+        background: #FFFFFF !important;
+        color: #000000 !important;
+        font-size: 13px !important;
+        text-align: center !important;
+        padding: 5px 10px !important;
+        border: 1px solid #000000 !important;
+    }}
+    </style>
+    """
 
 # ── page config ──────────────────────────────────────────────────────────────
 
@@ -298,7 +352,7 @@ with tab1:
         if do_all_camel:
             result.columns = [to_title_case(c) for c in result.columns]
 
-        st.dataframe(result.head(20), use_container_width=True, hide_index=True)
+        st.markdown(df_to_html_preview(result), unsafe_allow_html=True)
 
         xlsx_bytes = df_to_xlsx_bytes(result, col_padding=col_padding)
         out_name = uploaded.name.rsplit('.', 1)[0] + "_structured.xlsx"
@@ -427,7 +481,7 @@ with tab2:
         if map_all_camel:
             out_df.columns = [to_title_case(c) for c in out_df.columns]
 
-        st.dataframe(out_df.head(20), use_container_width=True, hide_index=True)
+        st.markdown(df_to_html_preview(out_df), unsafe_allow_html=True)
 
         # mapping summary
         with st.expander("📋 Mapping summary"):
